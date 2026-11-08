@@ -1,0 +1,52 @@
+{
+  "circuit_name": "Circuit de la Sarthe - Le Mans 24H",
+  "scale_system": {
+    "unit": "meters (1.0 unit = 1000 mm)",
+    "terrain_elevation_y": 0.0,
+    "kart_scale_ratio": "1:87 HO Racing Scale",
+    "track_width_m": 0.024,
+    "curb_width_m": 0.0028,
+    "kart_dimensions_m": {
+      "length": 0.018,
+      "width": 0.012,
+      "height": 0.008
+    }
+  },
+  "desk_objects": [
+    {
+      "id": "lemans_countryside_terrain",
+      "name": "French Rolling Countryside & Pastures",
+      "center_xyz": [0.0, -0.01, 0.0],
+      "dimensions_wdh": [5.0, 5.0, 0.02],
+      "top_surface_y": 0.0
+    },
+    {
+      "id": "dunlop_bridge_monument",
+      "name": "Iconic Dunlop Bridge Archway",
+      "center_xyz": [-0.48, 0.046, 0.05],
+      "dimensions_wdh": [0.09, 0.04, 0.055],
+      "top_surface_y": 0.08
+    },
+    {
+      "id": "pit_building_garages",
+      "name": "Le Mans 24H Pit Garages & Hospitality",
+      "center_xyz": [-0.05, 0.024, 0.32],
+      "dimensions_wdh": [0.46, 0.08, 0.045],
+      "top_surface_y": 0.07
+    },
+    {
+      "id": "main_pit_grandstands",
+      "name": "Main Straight Covered Grandstands",
+      "center_xyz": [-0.05, 0.024, 0.16],
+      "dimensions_wdh": [0.44, 0.07, 0.055],
+      "top_surface_y": 0.08
+    },
+    {
+      "id": "countryside_lake_pond",
+      "name": "French Countryside Lake",
+      "center_xyz": [-0.48, 0.01, 0.28],
+      "dimensions_wdh": [0.22, 0.18, 0.01],
+      "top_surface_y": 0.01
+    }
+  ]
+}

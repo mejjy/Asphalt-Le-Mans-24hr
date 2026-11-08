@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ASPHALT: LE MANS 24H</title>
+    <meta
+      name="description"
+      content="ASPHALT: LE MANS 24H - High-octane arcade racing on the legendary Circuit de la Sarthe in France with 24H day-to-night lighting, expansive French countryside, and responsive physics."
+    />
+    <meta property="og:title" content="ASPHALT: LE MANS 24H" />
+    <meta
+      property="og:description"
+      content="High-octane arcade racing on the legendary Circuit de la Sarthe in France with 24H day-to-night lighting, expansive French countryside, and responsive physics."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Orbitron:ital,wght@0,600;0,700;0,800;0,900;1,700;1,800;1,900&family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- 3D WebGL Canvas Mount -->
+    <div id="canvas-container"></div>
+
+    <!-- Helmet Visor Overlay (Visible in Camera 2: Helmet Visor POV — Clean, no top chip) -->
+    <div id="helmet-visor-overlay" class="hidden">
+      <div class="visor-vignette"></div>
+    </div>
+
+    <!-- Subtle Corner Vignette Behind HUD Elements (Visible in Camera Views 1 & 2) -->
+    <div id="hud-corner-vignette"></div>
+
+    <!-- Streamlined HUD Overlay -->
+    <div id="hud-root">
+      <!-- Top Row: Clickable "ASPHALT: LE MANS 24H" Title (Top-Left) & Lap Counter/Timer + Mute Icon (Top-Right) -->
+      <header class="hud-top-bar">
+        <div class="hud-top-left-stack">
+          <div
+            id="hud-brand-logo"
+            class="hud-brand-title"
+            role="button"
+            tabindex="0"
+            title="Click to open Controls &amp; Camera Menu"
+          ><span class="hud-menu-pill">MENU / CAMERAS</span></div>
+        </div>
+
+        <div class="hud-settings-anchor">
+          <div class="hud-top-right-row">
+            <!-- Top-Right 2-Minute Countdown Timer & Live Distance Readout (Visible in 1P & 2P Views) -->
+            <div id="hud-lap-widget" class="hud-lap-widget">
+              <div id="hud-lap-header" class="hud-lap-header">
+                TIME LEFT
+              </div>
+              <div id="hud-lap-timer" class="hud-lap-timer" aria-label="02:00"><span class="timer-digit" id="lap-d0">0</span><span class="timer-digit" id="lap-d1">2</span><span class="timer-sep">:</span><span class="timer-digit" id="lap-d2">0</span><span class="timer-digit" id="lap-d3">0</span></div>
+              <div id="hud-distance-row" class="hud-distance-row">
+                <span class="hud-distance-label">DISTANCE</span>
+                <span id="hud-distance-val" class="hud-distance-val">0.00 KM</span>
+              </div>
+              <div id="hud-lap-split" class="hud-lap-split hidden"></div>
+            </div>
+
+            <!-- Top-Right Mute / Unmute Sound Icon Button -->
+            <button
+              id="btn-mute-sound"
+              class="hud-mute-btn is-muted"
+              type="button"
+              aria-label="Toggle Sound (M)"
+              title="Toggle Sound (M)"
+            >
+              <!-- Speaker Unmuted Icon -->
+              <svg id="icon-sound-on" class="mute-svg hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+              <!-- Speaker Muted Icon -->
+              <svg id="icon-sound-off" class="mute-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <line x1="23" y1="9" x2="17" y2="15"></line>
+                <line x1="17" y1="9" x2="23" y2="15"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Full-Screen Cinematic Opening Sequence (Plays Once on Launch: Scene 1 Logo -> Scene 2 ASPHALT LE MANS 24H PRESENTS -> Main Menu) -->
+      <div id="cinematic-intro-overlay" class="cinematic-intro-overlay" role="dialog" aria-label="Opening Cinematic">
+        <div class="cinematic-bg-texture" aria-hidden="true"></div>
+
+        <!-- SCENE 1: LE MANS LOGO REVEAL -->
+        <div id="intro-scene-logo" class="intro-scene intro-scene-logo is-active">
+          <div class="intro-logo-frame">
+            <img
+              id="intro-lemans-logo-img"
+              src="/assets/aistudio/image_716289f2.png"
+              alt="24h Le Mans Official Logo"
+              class="intro-lemans-logo-img"
+              referrerpolicy="no-referrer"
+            />
+            <div id="intro-lemans-logo-fallback" class="intro-lemans-logo-fallback hidden" aria-hidden="true">
+              <span class="fallback-24h">24h</span>
+              <span class="fallback-lemans">LE MANS</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SCENE 2: GAME TITLE REVEAL (ASPHALT / LE MANS 24H / PRESENTS) -->
+        <div id="intro-scene-title" class="intro-scene intro-scene-title">
+          <div class="intro-title-lockup">
+            <div class="intro-title-rule" aria-hidden="true"></div>
+            <div id="intro-word-asphalt" class="intro-word-asphalt">ASPHALT</div>
+            <div id="intro-word-lemans" class="intro-word-lemans">LE MANS 24H</div>
+            <div class="intro-title-rule intro-title-rule-bottom" aria-hidden="true"></div>
+            <div id="intro-word-presents" class="intro-word-presents">PRESENTS</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Menu Overlay: Blurred Live 3D Game Environment + Exact Center "START CHALLENGE" Button -->
+      <div id="welcome-dialog-overlay" class="welcome-dialog-overlay intro-concealed" role="dialog" aria-labelledby="welcome-title">
+        <div class="welcome-backdrop-scrim" aria-hidden="true"></div>
+
+        <!-- Top Motorsport Title Lockup -->
+        <div class="welcome-top-brand-header">
+          <div class="welcome-eyebrow">CIRCUIT DE LA SARTHE · FRANCE · ENDURANCE SIMULATION</div>
+          <h1 id="welcome-title" class="welcome-title">
+            <span class="brand-asphalt">ASPHALT</span>
+            <span class="brand-lemans-sub">LE MANS 24H</span>
+          </h1>
+        </div>
+
+        <!-- Exact Screen-Center Focal CTA Button (50% / 50% Viewport Center) -->
+        <div class="welcome-center-cta-anchor">
+          <div class="welcome-center-focus-halo" aria-hidden="true"></div>
+          <button id="btn-welcome-start" class="welcome-start-btn" type="button">
+            <span id="welcome-start-text" class="welcome-start-text">START CHALLENGE</span>
+            <kbd id="welcome-enter-kbd" class="welcome-enter-kbd">ENTER ↵</kbd>
+          </button>
+          <div class="welcome-center-subcaption">2-MINUTE ENDURANCE DISTANCE TRIAL · 4 SARTHE SECTORS</div>
+        </div>
+
+        <!-- Discreet Bottom Motorsport Telemetry Dock (Controls & Camera Views) -->
+        <div class="welcome-bottom-dock">
+          <div class="welcome-controls-grid">
+            <!-- WASD Controls Panel -->
+            <div class="welcome-control-block">
+              <div class="welcome-control-label">DRIVING CONTROLS</div>
+              <div class="control-keys-list" aria-label="Driving Controls">
+                <div class="control-key-row">
+                  <div class="control-kbd-pair">
+                    <kbd class="welcome-key">W</kbd>
+                  </div>
+                  <span class="control-key-sep" aria-hidden="true">—</span>
+                  <span class="control-action-text">ACCELERATE</span>
+                </div>
+                <div class="control-key-row">
+                  <div class="control-kbd-pair">
+                    <kbd class="welcome-key">A</kbd>
+                    <span class="control-kbd-slash">/</span>
+                    <kbd class="welcome-key">D</kbd>
+                  </div>
+                  <span class="control-key-sep" aria-hidden="true">—</span>
+                  <span class="control-action-text">STEER</span>
+                </div>
+                <div class="control-key-row">
+                  <div class="control-kbd-pair">
+                    <kbd class="welcome-key">S</kbd>
+                  </div>
+                  <span class="control-key-sep" aria-hidden="true">—</span>
+                  <span class="control-action-text">BRAKE / REVERSE</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Game Views Panel (1-4) -->
+            <div class="welcome-control-block">
+              <div class="welcome-control-label">CAMERA TELEMETRY</div>
+              <div class="cam-keys-list" role="group" aria-label="Camera Views">
+                <div class="cam-key-row cam-pill active" data-cam="1" role="button" tabindex="0">
+                  <kbd class="welcome-key welcome-key-cam">1</kbd>
+                  <span class="cam-key-sep" aria-hidden="true">—</span>
+                  <span class="cam-label-text">CHASE VIEW</span>
+                </div>
+                <div class="cam-key-row cam-pill" data-cam="2" role="button" tabindex="0">
+                  <kbd class="welcome-key welcome-key-cam">2</kbd>
+                  <span class="cam-key-sep" aria-hidden="true">—</span>
+                  <span class="cam-label-text">COCKPIT</span>
+                </div>
+                <div class="cam-key-row cam-pill" data-cam="3" role="button" tabindex="0">
+                  <kbd class="welcome-key welcome-key-cam">3</kbd>
+                  <span class="cam-key-sep" aria-hidden="true">—</span>
+                  <span class="cam-label-text">CIRCUIT OVERVIEW</span>
+                </div>
+                <div class="cam-key-row cam-pill" data-cam="4" role="button" tabindex="0">
+                  <kbd class="welcome-key welcome-key-cam">4</kbd>
+                  <span class="cam-key-sep" aria-hidden="true">—</span>
+                  <span class="cam-label-text">DRONE VIEW</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center Formula 1 Countdown Number (Triggered by pressing Enter at Start) -->
+      <div id="hud-f1-countdown" class="hud-f1-countdown hidden">5</div>
+
+      <!-- End-of-Run Results & Credits Popup (Shown when 02:00 timer reaches 00:00) -->
+      <div id="hud-finish-overlay" class="welcome-dialog-overlay hud-finish-overlay hidden" role="dialog" aria-labelledby="hud-finish-title">
+        <div class="welcome-backdrop-scrim" aria-hidden="true"></div>
+        <div class="welcome-dialog-card finish-dialog-card">
+          <div class="welcome-eyebrow">CIRCUIT DE LA SARTHE · 2-MINUTE DISTANCE CHALLENGE</div>
+          <h2 id="hud-finish-title" class="hud-finish-title">RACE COMPLETE</h2>
+
+          <!-- Final Distance & Telemetry Section (Preserved & Shown First) -->
+          <div class="finish-results-section">
+            <div class="finish-distance-label">DISTANCE COVERED</div>
+            <div id="hud-finish-time" class="hud-finish-time">0.00 KM</div>
+            <div id="hud-finish-sub" class="hud-finish-sub">0 M · TIME: 02:00</div>
+            <div class="finish-telemetry-row">
+              <div class="finish-stat-pill">
+                <span class="finish-stat-label">TIME</span>
+                <span id="hud-finish-stat-time" class="finish-stat-val">02:00</span>
+              </div>
+              <div class="finish-stat-pill">
+                <span class="finish-stat-label">MAX SPEED</span>
+                <span id="hud-finish-stat-max" class="finish-stat-val">0 KM/H</span>
+              </div>
+              <div class="finish-stat-pill">
+                <span class="finish-stat-label">AVG SPEED</span>
+                <span id="hud-finish-stat-avg" class="finish-stat-val">0 KM/H</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="welcome-metallic-divider finish-credits-divider" aria-hidden="true"></div>
+
+          <!-- End-of-Game Credits Section (Matching Motorsport Theme) -->
+          <div id="finish-credits-panel" class="finish-credits-panel">
+            <div class="credits-team-heading">DEVELOPED BY</div>
+            <div class="credits-names-grid" role="list" aria-label="Development Team">
+              <div class="credits-name-item" role="listitem">MONICA</div>
+              <div class="credits-name-item" role="listitem">UDANTHIGA</div>
+              <div class="credits-name-item" role="listitem">SHOBHANA</div>
+              <div class="credits-name-item" role="listitem">NANDINI</div>
+              <div class="credits-name-item" role="listitem">SUMEDHA</div>
+              <div class="credits-name-item" role="listitem">JAHNAVI</div>
+            </div>
+            <div class="credits-footer-brand">ASPHALT: LE MANS 24H</div>
+            <div class="credits-footer-tagline">Built for the love of racing.</div>
+          </div>
+
+          <div class="finish-actions-row">
+            <button id="btn-finish-race-again" class="welcome-start-btn finish-action-btn" type="button">
+              <span class="welcome-start-text">PLAY AGAIN</span>
+              <kbd class="welcome-enter-kbd">ENTER ↵</kbd>
+            </button>
+            <button id="btn-finish-autopilot" class="welcome-start-btn finish-action-btn finish-autopilot-btn" type="button">
+              <span class="welcome-start-text">MAIN MENU</span>
+              <kbd class="welcome-enter-kbd">ESC</kbd>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Row: 3D Tilted Racetrack Minimap (Bottom-Left) | Angled Segmented Speedometer HUD (Bottom-Right) -->
+      <footer class="hud-bottom-bar">
+        <!-- Bottom-Left: Borderless Horizontally-Tilted 3D Racetrack Outline & Cyan Glowing Dot -->
+        <div class="hud-minimap-widget" title="Circuit de la Sarthe - Live Telemetry">
+          <canvas id="minimap-canvas" width="600" height="390"></canvas>
+        </div>
+
+        <!-- Bottom-Right: Sleek Angled Segmented Speed Bar + Italic KM/H & Speed Readout -->
+        <div class="hud-speedo-gauge">
+          <svg id="speedo-gauge-svg" viewBox="0 0 284 134" class="speedo-svg">
+            <defs>
+              <linearGradient id="speedoFrameStrokeGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="rgba(255, 255, 255, 0.35)" />
+                <stop offset="45%" stop-color="rgba(160, 240, 255, 0.55)" />
+                <stop offset="100%" stop-color="rgba(0, 232, 255, 0.92)" />
+              </linearGradient>
+              <filter id="speedoCyanGlow" x="-25%" y="-25%" width="150%" height="150%">
+                <feGaussianBlur stdDeviation="2.4" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            <!-- Outer dark angled bar casing & cyan-accented frame -->
+            <polygon
+              id="speedo-bar-casing"
+              points="15,108 62,34 268,6 276,22 73,50 28,118"
+              class="speedo-bar-casing"
+              stroke="url(#speedoFrameStrokeGrad)"
+            />
+
+            <!-- 18 angled parallelogram speed segments populated dynamically at startup -->
+            <g id="speedo-ticks-group"></g>
+          </svg>
+
+          <!-- Italic KM/H label & Large Bold Italic Speed Readout tucked inside the angled bar -->
+          <div class="speedo-readout-group">
+            <div class="speedo-unit-label">KM/H</div>
+            <div id="hud-scale-speed" class="speedo-digits">0</div>
+          </div>
+        </div>
+      </footer>
+
+      <!-- Mobile Bottom Touch Controls Row (Visible in Mobile View after clicking Start Time Trial) -->
+      <div
+        id="mobile-touch-controls"
+        class="mobile-touch-controls hidden"
+        role="region"
+        aria-label="Mobile Driving Controls"
+      >
+        <!-- Left Side: Left (A) and Right (D) Steer Icons -->
+        <div class="mobile-ctrl-cluster mobile-steer-cluster" role="group" aria-label="Steering Controls">
+          <button
+            id="btn-touch-left"
+            class="mobile-ctrl-btn mobile-ctrl-steer"
+            type="button"
+            data-control="left"
+            aria-label="Steer Left (A)"
+            title="Steer Left (A)"
+          >
+            <span class="mobile-ctrl-inner">
+              <svg class="mobile-ctrl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="13 17 8 12 13 7"></polyline>
+                <polyline points="18 17 13 12 18 7" opacity="0.45"></polyline>
+              </svg>
+              <span class="mobile-ctrl-label">LEFT</span>
+            </span>
+          </button>
+
+          <button
+            id="btn-touch-right"
+            class="mobile-ctrl-btn mobile-ctrl-steer"
+            type="button"
+            data-control="right"
+            aria-label="Steer Right (D)"
+            title="Steer Right (D)"
+          >
+            <span class="mobile-ctrl-inner">
+              <svg class="mobile-ctrl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="11 17 16 12 11 7"></polyline>
+                <polyline points="6 17 11 12 6 7" opacity="0.45"></polyline>
+              </svg>
+              <span class="mobile-ctrl-label">RIGHT</span>
+            </span>
+          </button>
+        </div>
+
+        <!-- Right Side: Accelerate (W) and Brake (S) Icons -->
+        <div class="mobile-ctrl-cluster mobile-pedal-cluster" role="group" aria-label="Accelerate and Brake Controls">
+          <button
+            id="btn-touch-accel"
+            class="mobile-ctrl-btn mobile-ctrl-accel"
+            type="button"
+            data-control="forward"
+            aria-label="Accelerate (W)"
+            title="Accelerate (W)"
+          >
+            <span class="mobile-ctrl-inner">
+              <svg class="mobile-ctrl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="17 13 12 8 7 13"></polyline>
+                <polyline points="17 18 12 13 7 18" opacity="0.45"></polyline>
+              </svg>
+              <span class="mobile-ctrl-label">ACCEL</span>
+            </span>
+          </button>
+
+          <button
+            id="btn-touch-brake"
+            class="mobile-ctrl-btn mobile-ctrl-brake"
+            type="button"
+            data-control="backward"
+            aria-label="Brake (S)"
+            title="Brake (S)"
+          >
+            <span class="mobile-ctrl-inner">
+              <svg class="mobile-ctrl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="7 8 12 13 17 8"></polyline>
+                <line x1="7" y1="17" x2="17" y2="17"></line>
+              </svg>
+              <span class="mobile-ctrl-label">BRAKE</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
