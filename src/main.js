@@ -2559,6 +2559,75 @@ async function initApp() {
     : [];
   const activeTouchDirs = new Set();
   const activePointerDirs = new Map();
+  let runtimeTouchDetected = false;
+
+  function getActiveViewportSize() {
+    const vv = window.visualViewport;
+    const w = Math.max(
+      1,
+      Math.round(vv && vv.width ? vv.width : window.innerWidth || document.documentElement.clientWidth || 1)
+    );
+    const h = Math.max(
+      1,
+      Math.round(vv && vv.height ? vv.height : window.innerHeight || document.documentElement.clientHeight || 1)
+    );
+    return { w, h };
+  }
+
+  function detectTouchDeviceCapability() {
+    if (runtimeTouchDetected) return true;
+
+    const maxTouchPoints =
+      typeof navigator !== 'undefined'
+        ? Number(navigator.maxTouchPoints || navigator.msMaxTouchPoints || 0)
+        : 0;
+    const hasTouchStartProp =
+      typeof window !== 'undefined' &&
+      ('ontouchstart' in window ||
+        (typeof DocumentTouch !== 'undefined' && document instanceof DocumentTouch));
+
+    let hasCoarsePointer = false;
+    let hasAnyCoarsePointer = false;
+    let hasNoHover = false;
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+      hasAnyCoarsePointer = window.matchMedia('(any-pointer: coarse)').matches;
+      hasNoHover = window.matchMedia('(hover: none)').matches;
+    }
+
+    const ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+    const isMobileUA =
+      Boolean(navigator?.userAgentData?.mobile) ||
+      /Android|SamsungBrowser|SM-[A-Z0-9]+|GT-[A-Z0-9]+|SCH-[A-Z0-9]+|SGH-[A-Z0-9]+|SPH-[A-Z0-9]+|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle|BlackBerry|Opera Mini|IEMobile/i.test(
+        ua
+      );
+
+    const { w, h } = getActiveViewportSize();
+    const isPhoneOrCompactViewport = w <= 960 || h <= 560 || w / Math.max(1, h) <= 0.8;
+
+    // Prioritize hardware touch capabilities & coarse pointer queries;
+    // on Windows laptops with touchscreens (large desktop screen + fine mouse pointer + hover),
+    // wait for actual touch interaction unless viewport is mobile-sized or coarse primary pointer.
+    if (isMobileUA || hasCoarsePointer || (hasAnyCoarsePointer && (hasNoHover || isPhoneOrCompactViewport))) {
+      return true;
+    }
+    if ((maxTouchPoints > 0 || hasTouchStartProp) && (hasNoHover || hasAnyCoarsePointer || isPhoneOrCompactViewport)) {
+      return true;
+    }
+    if (isPhoneOrCompactViewport) {
+      return true;
+    }
+    return false;
+  }
+
+  function syncTouchCapabilityClass() {
+    const { w, h } = getActiveViewportSize();
+    document.documentElement.style.setProperty('--app-width', `${w}px`);
+    document.documentElement.style.setProperty('--app-height', `${h}px`);
+    const isTouchCapable = detectTouchDeviceCapability();
+    document.documentElement.classList.toggle('is-touch-device', isTouchCapable);
+    return isTouchCapable;
+  }
 
   function applyMobileTouchState() {
     const allDirs = ['left', 'right', 'forward', 'backward'];
@@ -2597,6 +2666,7 @@ async function initApp() {
   }
 
   function syncMobileTouchControlsVisibility() {
+    syncTouchCapabilityClass();
     if (!elMobileTouchControls) return;
     const isWelcomeOpen =
       elWelcomeOverlay && !elWelcomeOverlay.classList.contains('hidden');
@@ -2609,8 +2679,85 @@ async function initApp() {
     }
   }
 
+  function resolveTouchControlButton(clientX, clientY, targetEl) {
+    if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+      const hitEl = document.elementFromPoint(clientX, clientY);
+      const directBtn = hitEl && hitEl.closest ? hitEl.closest('.mobile-ctrl-btn') : null;
+      if (directBtn && directBtn.dataset.control) {
+        return directBtn;
+      }
+
+      // Bounding-box check with 14px touch-slop pad for Samsung Android Chrome / Samsung Internet
+      const hitPad = 14;
+      for (const btn of mobileControlButtons) {
+        const rect = btn.getBoundingClientRect();
+        if (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          clientX >= rect.left - hitPad &&
+          clientX <= rect.right + hitPad &&
+          clientY >= rect.top - hitPad &&
+          clientY <= rect.bottom + hitPad
+        ) {
+          return btn;
+        }
+      }
+
+      // Continuous press-and-hold retention: if thumb started on a button and rolled slightly outside
+      // (up to 42px from button edge) while holding, retain the originating button unless sliding onto a sibling button
+      const originBtn = targetEl && targetEl.closest ? targetEl.closest('.mobile-ctrl-btn') : null;
+      if (originBtn && originBtn.dataset.control) {
+        const rect = originBtn.getBoundingClientRect();
+        const holdMargin = 42;
+        if (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          clientX >= rect.left - holdMargin &&
+          clientX <= rect.right + holdMargin &&
+          clientY >= rect.top - holdMargin &&
+          clientY <= rect.bottom + holdMargin
+        ) {
+          return originBtn;
+        }
+      }
+    } else if (targetEl && targetEl.closest) {
+      const fallbackBtn = targetEl.closest('.mobile-ctrl-btn');
+      if (fallbackBtn && fallbackBtn.dataset.control) {
+        return fallbackBtn;
+      }
+    }
+    return null;
+  }
+
+  // Ensure any touch interaction anywhere on the page latches touch capability mode immediately
+  window.addEventListener(
+    'touchstart',
+    () => {
+      if (!runtimeTouchDetected) {
+        runtimeTouchDetected = true;
+        syncMobileTouchControlsVisibility();
+      }
+    },
+    { passive: true }
+  );
+
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      if ((e.pointerType === 'touch' || e.pointerType === 'pen') && !runtimeTouchDetected) {
+        runtimeTouchDetected = true;
+        syncMobileTouchControlsVisibility();
+      }
+    },
+    { passive: true }
+  );
+
   if (elMobileTouchControls && mobileControlButtons.length > 0) {
     const updateFromTouches = (e) => {
+      runtimeTouchDetected = true;
+      if (!document.documentElement.classList.contains('is-touch-device')) {
+        document.documentElement.classList.add('is-touch-device');
+      }
       if (e.cancelable) {
         e.preventDefault();
       }
@@ -2618,8 +2765,7 @@ async function initApp() {
       const touches = e.touches || [];
       for (let i = 0; i < touches.length; i++) {
         const t = touches[i];
-        const hitEl = document.elementFromPoint(t.clientX, t.clientY);
-        const btn = hitEl && hitEl.closest ? hitEl.closest('.mobile-ctrl-btn') : null;
+        const btn = resolveTouchControlButton(t.clientX, t.clientY, t.target);
         if (btn && btn.dataset.control) {
           activeTouchDirs.add(btn.dataset.control);
         }
@@ -2648,8 +2794,13 @@ async function initApp() {
       if (!dir) continue;
 
       btn.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'touch') return;
-        e.preventDefault();
+        if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+          runtimeTouchDetected = true;
+          document.documentElement.classList.add('is-touch-device');
+        }
+        if (e.cancelable) {
+          e.preventDefault();
+        }
         e.stopPropagation();
         try {
           btn.setPointerCapture(e.pointerId);
@@ -2660,8 +2811,18 @@ async function initApp() {
         applyMobileTouchState();
       });
 
+      btn.addEventListener('pointermove', (e) => {
+        if (!activePointerDirs.has(e.pointerId)) return;
+        const resolvedBtn = resolveTouchControlButton(e.clientX, e.clientY, btn);
+        if (resolvedBtn && resolvedBtn.dataset.control) {
+          activePointerDirs.set(e.pointerId, resolvedBtn.dataset.control);
+        } else {
+          activePointerDirs.delete(e.pointerId);
+        }
+        applyMobileTouchState();
+      });
+
       const releasePointer = (e) => {
-        if (e.pointerType === 'touch') return;
         if (activePointerDirs.has(e.pointerId)) {
           activePointerDirs.delete(e.pointerId);
           applyMobileTouchState();
@@ -3056,11 +3217,11 @@ async function initApp() {
   let screenshotFrameCounter = 0;
 
   // -------------------------------------------------------------------------
-  // 7. WINDOW RESIZE & 60FPS ANIMATION LOOP
+  // 7. WINDOW / VISUAL VIEWPORT RESIZE & 60FPS ANIMATION LOOP
   // -------------------------------------------------------------------------
-  window.addEventListener('resize', () => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+  const handleViewportResize = () => {
+    syncMobileTouchControlsVisibility();
+    const { w, h } = getActiveViewportSize();
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
@@ -3073,7 +3234,18 @@ async function initApp() {
     if (speedMotionBlurPass && speedMotionBlurPass.uniforms) {
       speedMotionBlurPass.uniforms['uAspect'].value = w / Math.max(1, h);
     }
+  };
+
+  window.addEventListener('resize', handleViewportResize);
+  window.addEventListener('orientationchange', () => {
+    handleViewportResize();
+    setTimeout(handleViewportResize, 120);
+    setTimeout(handleViewportResize, 320);
   });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleViewportResize);
+  }
+  handleViewportResize();
 
   const clock = new THREE.Clock();
   let currentFocusDistance = activeCameraMode === 7 ? 1.85 : activeCameraMode === 8 ? 0.42 : 0.12;
