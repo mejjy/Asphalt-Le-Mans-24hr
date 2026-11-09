@@ -37,14 +37,51 @@ async function initApp() {
     45.0   // 45m far plane for French countryside, hills & horizon
   );
 
+  const urlParams = new URLSearchParams(window.location.search);
+  const isScreenshotUrl = urlParams.get('screenshot') === '1';
+  const isScreenshotMode = isScreenshotUrl;
+
+  // Adaptive Device & Mobile GPU Capability Detection (Android / iOS / Mobile TBDR GPUs)
+  const uaString = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  const isAndroidDevice = /Android/i.test(uaString);
+  const isIOSDevice =
+    /iPhone|iPad|iPod/i.test(uaString) ||
+    (typeof navigator !== 'undefined' &&
+      navigator.platform === 'MacIntel' &&
+      navigator.maxTouchPoints > 1);
+  const hasCoarseTouch =
+    typeof navigator !== 'undefined' &&
+    (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) &&
+    (window.matchMedia?.('(pointer: coarse)').matches ||
+      window.matchMedia?.('(any-pointer: coarse)').matches ||
+      Math.min(window.innerWidth, window.innerHeight) <= 960);
+
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     powerPreference: 'high-performance',
   });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  const urlParams = new URLSearchParams(window.location.search);
-  const isScreenshotUrl = urlParams.get('screenshot') === '1';
-  const isScreenshotMode = isScreenshotUrl;
+
+  let isMobileGpu = false;
+  try {
+    const gl = renderer.getContext();
+    const dbgInfo = gl ? gl.getExtension('WEBGL_debug_renderer_info') : null;
+    const gpuRendererStr =
+      dbgInfo && gl ? String(gl.getParameter(dbgInfo.UNMASKED_RENDERER_WEBGL) || '') : '';
+    if (/Adreno|Mali|PowerVR|Xclipse|Maleoon|Samsung|Apple GPU/i.test(gpuRendererStr)) {
+      isMobileGpu = true;
+    }
+  } catch (_e) {
+    // Ignore WebGL debug extension restrictions
+  }
+
+  const isMobileDevice =
+    !isScreenshotMode && (isAndroidDevice || isIOSDevice || hasCoarseTouch || isMobileGpu);
+  const perfConfig = {
+    isMobileDevice,
+    isAndroidDevice,
+    shadowMapSize: isMobileDevice ? 1024 : 2048,
+  };
 
   // Opening Cinematic DOM elements (Plays once per game launch: Logo -> ASPHALT LE MANS 24H PRESENTS -> Main Menu)
   const elCinematicIntro = document.getElementById('cinematic-intro-overlay');
@@ -145,10 +182,15 @@ async function initApp() {
     }
   }
 
-  const pixelRatio = isScreenshotUrl ? 1.0 : Math.min(window.devicePixelRatio, 2.0);
-  renderer.setPixelRatio(pixelRatio);
+  const maxDevicePixelRatio = isAndroidDevice ? 1.25 : isMobileDevice ? 1.5 : 2.0;
+  let activePixelRatio = isScreenshotUrl ? 1.0 : Math.min(window.devicePixelRatio || 1.0, maxDevicePixelRatio);
+  renderer.setPixelRatio(activePixelRatio);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = isMobileDevice ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  if (isMobileDevice) {
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
+  }
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.86;
   container.appendChild(renderer.domElement);
@@ -160,8 +202,9 @@ async function initApp() {
 
   const composer = new EffectComposer(renderer);
   const rtSize = renderer.getDrawingBufferSize(new THREE.Vector2());
-  composer.renderTarget1.depthTexture = new THREE.DepthTexture(rtSize.x, rtSize.y, THREE.FloatType);
-  composer.renderTarget2.depthTexture = new THREE.DepthTexture(rtSize.x, rtSize.y, THREE.FloatType);
+  const depthTexType = isMobileDevice ? THREE.UnsignedIntType : THREE.FloatType;
+  composer.renderTarget1.depthTexture = new THREE.DepthTexture(rtSize.x, rtSize.y, depthTexType);
+  composer.renderTarget2.depthTexture = new THREE.DepthTexture(rtSize.x, rtSize.y, depthTexType);
 
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
@@ -276,6 +319,7 @@ async function initApp() {
     0.15,  // tight radius
     1.85   // high threshold
   );
+  bloomPass.enabled = false;
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
 
@@ -540,8 +584,8 @@ async function initApp() {
   scene.environmentIntensity = 0.22;
 
   reportLoadingStep(45, 'GENERATING LE MANS COUNTRYSIDE & CIRCUIT...');
-  const atmosphere = buildGoldenHourAtmosphere(scene);
-  const diorama = buildProceduralDeskDiorama(manifest, splineData);
+  const atmosphere = buildGoldenHourAtmosphere(scene, perfConfig);
+  const diorama = buildProceduralDeskDiorama(manifest, splineData, perfConfig);
   scene.add(diorama.root);
   if (diorama.nightGlowGroup) {
     scene.add(diorama.nightGlowGroup);
@@ -552,6 +596,21 @@ async function initApp() {
 
   const roomEnv = buildRoomEnvironment(scene, settings);
   scene.add(roomEnv.roomRoot);
+
+  // On mobile/Android GPUs, disable secondary decorative SpotLights/PointLights so PBR fragment
+  // shaders only evaluate the primary DirectionalLight + HemisphereLight + trackside fill light
+  if (isMobileDevice) {
+    brandArches.archesRoot.traverse((child) => {
+      if (child.isSpotLight || child.isPointLight) {
+        child.visible = false;
+      }
+    });
+    roomEnv.roomRoot.traverse((child) => {
+      if (child.isSpotLight || child.isPointLight) {
+        child.visible = false;
+      }
+    });
+  }
 
   const coaster = buildCoasterTrack(splineData);
   scene.add(coaster.trackGroup);
@@ -1033,8 +1092,6 @@ async function initApp() {
   }
 
   checkAndLoadGlbModels();
-  // Poll gently until all 4 GLBs are loaded
-  glbPollInterval = setInterval(checkAndLoadGlbModels, 10000);
 
   // Safety fallback so circuit never hangs on stalled network requests
   setTimeout(() => {
@@ -3225,14 +3282,16 @@ async function initApp() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-    composer.setSize(w, h);
-    const newDrawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
-    fxaaPass.material.uniforms['resolution'].value.set(
-      1.0 / newDrawSize.x,
-      1.0 / newDrawSize.y
-    );
-    if (speedMotionBlurPass && speedMotionBlurPass.uniforms) {
-      speedMotionBlurPass.uniforms['uAspect'].value = w / Math.max(1, h);
+    if (!isMobileDevice || isScreenshotMode) {
+      composer.setSize(w, h);
+      const newDrawSize = renderer.getDrawingBufferSize(new THREE.Vector2());
+      fxaaPass.material.uniforms['resolution'].value.set(
+        1.0 / newDrawSize.x,
+        1.0 / newDrawSize.y
+      );
+      if (speedMotionBlurPass && speedMotionBlurPass.uniforms) {
+        speedMotionBlurPass.uniforms['uAspect'].value = w / Math.max(1, h);
+      }
     }
   };
 
@@ -3310,11 +3369,35 @@ async function initApp() {
     return bestZ < Infinity ? bestZ : computeExactViewDepth(kartWorldPt);
   }
 
+  let mobileShadowFrameTick = 0;
+  let perfSampleFrames = 0;
+  let perfSampleAccumDt = 0.0;
+  let hasSteppedDownMobileDpr = false;
+
   function animate() {
     const dt = isScreenshotMode ? 1 / 60 : clock.getDelta();
     const elapsedTime =
       (isScreenshotMode ? screenshotFrameCounter / 60 : clock.getElapsedTime()) +
       requestedTimeOffset;
+
+    // Runtime Adaptive Quality Governor for Android / Mobile GPUs:
+    // If sustained frame time exceeds 24ms (< 42 FPS) over 45 frames, step pixelRatio down to 1.0
+    if (isMobileDevice && !hasSteppedDownMobileDpr && activePixelRatio > 1.0 && dt > 0.001 && dt < 0.25) {
+      perfSampleFrames++;
+      perfSampleAccumDt += dt;
+      if (perfSampleFrames >= 45) {
+        const avgFrameMs = (perfSampleAccumDt / perfSampleFrames) * 1000.0;
+        if (avgFrameMs > 24.0) {
+          hasSteppedDownMobileDpr = true;
+          activePixelRatio = 1.0;
+          renderer.setPixelRatio(1.0);
+          const { w, h } = getActiveViewportSize();
+          renderer.setSize(w, h);
+        }
+        perfSampleFrames = 0;
+        perfSampleAccumDt = 0.0;
+      }
+    }
 
     // 0. Step Formula 1 5-Light Start Countdown if active
     stepF1StartCountdown(isScreenshotMode ? 0.0 : dt);
@@ -3352,137 +3435,130 @@ async function initApp() {
     // 4. Update Camera (Chase / Visor POV / Diorama / Helicopter / Inspector / Course Pan / Room Panorama / Gemini 4 Dresser / Keyboard Heli)
     updateCamera(dt, elapsedTime, st);
 
-    // 4b. Dynamically Autofocus Depth of Field (BokehPass)
-    // Uses exact view-space Z projection ((P - camera.position) ·
-    // cameraForward) so BokehPass's `rawFactor = focus + viewZ` is 0.0000 on
-    // the focused target even when off-center in the frame! By default
-    // (`!settings.dofFocusNearest`), Mode 3 and all racing/panoramic views lock
-    // focus directly onto the car; when `#chk-dof-nearest` is checked, locks
-    // onto whichever visible object in the frame is closest to the camera.
-    camera.getWorldDirection(_dofCamDir);
-    _dofKartPos.copy(st.position).addScaledVector(st.normal, 0.0030);
-    const kartViewDepth = computeExactViewDepth(_dofKartPos);
-    const safeKartDepth = THREE.MathUtils.clamp(
-        kartViewDepth > camera.near + 0.002 ?
-            kartViewDepth :
-            camera.position.distanceTo(_dofKartPos),
-        0.003, 2.2);
+    if (!isMobileDevice || isScreenshotMode) {
+      // 4b. Dynamically Autofocus Depth of Field (BokehPass) on Desktop
+      camera.getWorldDirection(_dofCamDir);
+      _dofKartPos.copy(st.position).addScaledVector(st.normal, 0.0030);
+      const kartViewDepth = computeExactViewDepth(_dofKartPos);
+      const safeKartDepth = THREE.MathUtils.clamp(
+          kartViewDepth > camera.near + 0.002 ?
+              kartViewDepth :
+              camera.position.distanceTo(_dofKartPos),
+          0.003, 2.2);
 
-    let targetFocusDist;
-    if (activeCameraMode === 7) {
-      targetFocusDist = 1.85;
-    } else if (activeCameraMode === 8) {
-      targetFocusDist = 0.42;
-    } else if (activeCameraMode === 5) {
-      targetFocusDist = THREE.MathUtils.clamp(
-        camera.position.distanceTo(orbitControls.target),
-        0.025,
-        2.5
+      let targetFocusDist;
+      if (activeCameraMode === 7) {
+        targetFocusDist = 1.85;
+      } else if (activeCameraMode === 8) {
+        targetFocusDist = 0.42;
+      } else if (activeCameraMode === 5) {
+        targetFocusDist = THREE.MathUtils.clamp(
+          camera.position.distanceTo(orbitControls.target),
+          0.025,
+          2.5
+        );
+      } else if (settings.dofFocusNearest) {
+        targetFocusDist = THREE.MathUtils.clamp(
+            computeNearestVisibleObjectDepth(_dofKartPos), 0.003, 2.2);
+      } else if (activeCameraMode === 2) {
+        targetFocusDist = 0.042;
+      } else {
+        targetFocusDist = safeKartDepth;
+      }
+      currentFocusDistance = isScreenshotMode ?
+          targetFocusDist :
+          THREE.MathUtils.lerp(currentFocusDistance, targetFocusDist, 0.38);
+
+      const urlDofParam = urlParams.get('dof');
+      const dofScale =
+        urlDofParam !== null ? parseFloat(urlDofParam) : (settings.dofStrength ?? 0.35);
+      const isRoomCam = activeCameraMode === 5 || activeCameraMode === 7 || activeCameraMode === 8;
+      const is1PCam = activeCameraMode === 1 || activeCameraMode === 2;
+      const isCineDofCam =
+        activeCameraMode === 3 ||
+        activeCameraMode === 4 ||
+        activeCameraMode === 6 ||
+        activeCameraMode === 9;
+      const isMainMenuBlurActive = Boolean(
+        elWelcomeOverlay &&
+        !elWelcomeOverlay.classList.contains('hidden') &&
+        !elWelcomeOverlay.classList.contains('intro-concealed')
       );
-    } else if (settings.dofFocusNearest) {
-      targetFocusDist = THREE.MathUtils.clamp(
-          computeNearestVisibleObjectDepth(_dofKartPos), 0.003, 2.2);
-    } else if (activeCameraMode === 2) {
-      targetFocusDist = 0.042;
-    } else {
-      // Modes 1, 3, 4, 6, 9: Lock Depth of Field directly onto the car's exact
-      // view-space depth!
-      targetFocusDist = safeKartDepth;
-    }
-    currentFocusDistance = isScreenshotMode ?
-        targetFocusDist :
-        THREE.MathUtils.lerp(currentFocusDistance, targetFocusDist, 0.38);
+      const activeDofScale = dofScale > 0.01 && !isRoomCam ? dofScale : 0.0;
+      bokehPass.enabled = isMainMenuBlurActive || activeDofScale > 0.001;
+      if (bokehPass.uniforms) {
+        // When Main Menu is open, apply a strong cinematic depth-of-field blur across the live 3D background
+        bokehPass.uniforms['focus'].value = isMainMenuBlurActive ? 0.004 : currentFocusDistance;
+        bokehPass.uniforms['aperture'].value = isMainMenuBlurActive
+          ? 0.026
+          : isRoomCam
+            ? 0.0
+            : is1PCam
+              ? 0.0042 * activeDofScale
+              : isCineDofCam
+                ? 0.018 * activeDofScale
+                : 0.008 * activeDofScale;
+        bokehPass.uniforms['maxblur'].value = isMainMenuBlurActive
+          ? 0.011
+          : isRoomCam
+            ? 0.0
+            : is1PCam
+              ? 0.0032 * Math.min(1.5, activeDofScale)
+              : isCineDofCam
+                ? Math.min(0.0072, 0.0042 * activeDofScale)
+                : 0.0042 * activeDofScale;
+      }
 
-    const urlDofParam = urlParams.get('dof');
-    const dofScale =
-      urlDofParam !== null ? parseFloat(urlDofParam) : (settings.dofStrength ?? 0.35);
-    const isRoomCam = activeCameraMode === 5 || activeCameraMode === 7 || activeCameraMode === 8;
-    const is1PCam = activeCameraMode === 1 || activeCameraMode === 2;
-    const isCineDofCam =
-      activeCameraMode === 3 ||
-      activeCameraMode === 4 ||
-      activeCameraMode === 6 ||
-      activeCameraMode === 9;
-    const isMainMenuBlurActive = Boolean(
-      elWelcomeOverlay &&
-      !elWelcomeOverlay.classList.contains('hidden') &&
-      !elWelcomeOverlay.classList.contains('intro-concealed')
-    );
-    const activeDofScale = dofScale > 0.01 && !isRoomCam ? dofScale : 0.0;
-    bokehPass.enabled = true;
-    if (bokehPass.uniforms) {
-      // When Main Menu is open, apply a strong cinematic depth-of-field blur across the live 3D background
-      bokehPass.uniforms['focus'].value = isMainMenuBlurActive ? 0.004 : currentFocusDistance;
-      bokehPass.uniforms['aperture'].value = isMainMenuBlurActive
-        ? 0.026
-        : isRoomCam
-          ? 0.0
-          : is1PCam
-            ? 0.0042 * activeDofScale
-            : isCineDofCam
-              ? 0.018 * activeDofScale
-              : 0.008 * activeDofScale;
-      bokehPass.uniforms['maxblur'].value = isMainMenuBlurActive
-        ? 0.011
-        : isRoomCam
-          ? 0.0
-          : is1PCam
-            ? 0.0032 * Math.min(1.5, activeDofScale)
-            : isCineDofCam
-              ? Math.min(0.0072, 0.0042 * activeDofScale)
-              : 0.0042 * activeDofScale;
-    }
+      // 4c. Dynamically Update High-Speed Velocity Motion Blur Pass (SpeedMotionBlurPass)
+      if (speedMotionBlurPass && speedMotionBlurPass.uniforms) {
+        const isDrivingCam = activeCameraMode === 1 || activeCameraMode === 2;
+        const absSpd = Math.abs(st.speed || 0.0);
+        const speedRatio = THREE.MathUtils.clamp((absSpd - 0.045) / (0.215 - 0.045), 0.0, 1.35);
+        const boostFactor = st.boostActive > 0 ? Math.min(1.0, st.boostActive * 1.2) : 0.0;
+        const urlMbOverride = urlParams.has('motionblur') ? parseFloat(urlParams.get('motionblur')) : null;
 
-    // 4c. Dynamically Update High-Speed Velocity Motion Blur Pass (SpeedMotionBlurPass)
-    if (speedMotionBlurPass && speedMotionBlurPass.uniforms) {
-      const isDrivingCam = activeCameraMode === 1 || activeCameraMode === 2;
-      const absSpd = Math.abs(st.speed || 0.0);
-      // Ramp smoothly from 0 at low speed (< 0.045 m/s ~ 16 km/h) up to full intensity at top speed (0.215+ m/s)
-      const speedRatio = THREE.MathUtils.clamp((absSpd - 0.045) / (0.215 - 0.045), 0.0, 1.35);
-      const boostFactor = st.boostActive > 0 ? Math.min(1.0, st.boostActive * 1.2) : 0.0;
-      const urlMbOverride = urlParams.has('motionblur') ? parseFloat(urlParams.get('motionblur')) : null;
+        const targetBlurStrength =
+          urlMbOverride !== null && !Number.isNaN(urlMbOverride)
+            ? urlMbOverride
+            : isDrivingCam
+              ? (speedRatio * speedRatio * 0.036) + (boostFactor * 0.018)
+              : 0.0;
 
-      const targetBlurStrength =
-        urlMbOverride !== null && !Number.isNaN(urlMbOverride)
-          ? urlMbOverride
-          : isDrivingCam
-            ? (speedRatio * speedRatio * 0.036) + (boostFactor * 0.018)
-            : 0.0;
+        const mbLerp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 12.0);
+        currentMotionBlurStrength = THREE.MathUtils.lerp(
+          currentMotionBlurStrength,
+          targetBlurStrength,
+          mbLerp
+        );
 
-      const mbLerp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 12.0);
-      currentMotionBlurStrength = THREE.MathUtils.lerp(
-        currentMotionBlurStrength,
-        targetBlurStrength,
-        mbLerp
-      );
+        const targetSwing = isDrivingCam
+          ? THREE.MathUtils.clamp(-(st.steerInput || 0.0) * speedRatio * 0.32, -0.35, 0.35)
+          : 0.0;
+        currentLateralSwing = THREE.MathUtils.lerp(currentLateralSwing, targetSwing, mbLerp);
 
-      // Lateral camera swing during high-speed cornering
-      const targetSwing = isDrivingCam
-        ? THREE.MathUtils.clamp(-(st.steerInput || 0.0) * speedRatio * 0.32, -0.35, 0.35)
-        : 0.0;
-      currentLateralSwing = THREE.MathUtils.lerp(currentLateralSwing, targetSwing, mbLerp);
+        _mbVanishWorld
+          .copy(st.position)
+          .addScaledVector(camForward, 0.095)
+          .addScaledVector(st.normal, 0.0045);
+        _mbNdc.copy(_mbVanishWorld).project(camera);
+        const vanishUvX = THREE.MathUtils.clamp(_mbNdc.x * 0.5 + 0.5, 0.20, 0.80);
+        const vanishUvY = THREE.MathUtils.clamp(_mbNdc.y * 0.5 + 0.5, 0.35, 0.78);
 
-      // Project 3D forward vanishing point and car center into [0, 1] screen UV coordinates
-      _mbVanishWorld
-        .copy(st.position)
-        .addScaledVector(camForward, 0.095)
-        .addScaledVector(st.normal, 0.0045);
-      _mbNdc.copy(_mbVanishWorld).project(camera);
-      const vanishUvX = THREE.MathUtils.clamp(_mbNdc.x * 0.5 + 0.5, 0.20, 0.80);
-      const vanishUvY = THREE.MathUtils.clamp(_mbNdc.y * 0.5 + 0.5, 0.35, 0.78);
+        _mbCarWorld.copy(st.position).addScaledVector(st.normal, 0.0032);
+        _mbNdc.copy(_mbCarWorld).project(camera);
+        const carUvX = THREE.MathUtils.clamp(_mbNdc.x * 0.5 + 0.5, 0.15, 0.85);
+        const carUvY = THREE.MathUtils.clamp(_mbNdc.y * 0.5 + 0.5, 0.10, 0.60);
 
-      _mbCarWorld.copy(st.position).addScaledVector(st.normal, 0.0032);
-      _mbNdc.copy(_mbCarWorld).project(camera);
-      const carUvX = THREE.MathUtils.clamp(_mbNdc.x * 0.5 + 0.5, 0.15, 0.85);
-      const carUvY = THREE.MathUtils.clamp(_mbNdc.y * 0.5 + 0.5, 0.10, 0.60);
+        speedMotionBlurPass.enabled = currentMotionBlurStrength > 0.0005;
+        speedMotionBlurPass.uniforms['uStrength'].value = currentMotionBlurStrength;
+        speedMotionBlurPass.uniforms['uBoostFactor'].value = boostFactor;
+        speedMotionBlurPass.uniforms['uVanishingPoint'].value.set(vanishUvX, vanishUvY);
+        speedMotionBlurPass.uniforms['uCarScreenPos'].value.set(carUvX, carUvY);
+        speedMotionBlurPass.uniforms['uProtectCar'].value = activeCameraMode === 1 ? 1.0 : 0.0;
+        speedMotionBlurPass.uniforms['uLateralSwing'].value = currentLateralSwing;
+      }
 
-      speedMotionBlurPass.enabled = currentMotionBlurStrength > 0.0005;
-      speedMotionBlurPass.uniforms['uStrength'].value = currentMotionBlurStrength;
-      speedMotionBlurPass.uniforms['uBoostFactor'].value = boostFactor;
-      speedMotionBlurPass.uniforms['uVanishingPoint'].value.set(vanishUvX, vanishUvY);
-      speedMotionBlurPass.uniforms['uCarScreenPos'].value.set(carUvX, carUvY);
-      speedMotionBlurPass.uniforms['uProtectCar'].value = activeCameraMode === 1 ? 1.0 : 0.0;
-      speedMotionBlurPass.uniforms['uLateralSwing'].value = currentLateralSwing;
+      bloomPass.enabled = (settings.bloomStrength ?? 0.0) > 0.001;
     }
 
     // 5. Update WebAudio Synth & HUD
@@ -3518,8 +3594,6 @@ async function initApp() {
         loadedGlbStatus.room;
       const elapsedMs = performance.now() - appInitTimestamp;
 
-      // In headless screenshot mode, let all 4 GLBs and web fonts finish
-      // loading before running heavy WebGL renders
       if ((!allFourGlbsLoaded && elapsedMs < 15000) ||
           (!window.__deskRacerFontsReady && elapsedMs < 3500)) {
         requestAnimationFrame(animate);
@@ -3544,10 +3618,28 @@ async function initApp() {
       return;
     }
 
-    // 6. Render with ACES Filmic Tone Mapping + Zero-Geometry-Pass BokehPass + UnrealBloomPass
+    // 6. Render Scene:
+    // - On Mobile / Android GPUs: Render directly to the hardware MSAA default framebuffer
+    //   (keeping all shading in fast on-chip tile memory with zero offscreen render-target resolves)
+    // - On Desktop GPUs: Render through EffectComposer (BokehPass + SpeedMotionBlurPass + FXAA)
     renderer.info.autoReset = false;
     renderer.info.reset();
-    composer.render();
+    if (isMobileDevice) {
+      mobileShadowFrameTick = (mobileShadowFrameTick + 1) % 6;
+      if (mobileShadowFrameTick === 0) {
+        renderer.shadowMap.needsUpdate = true;
+      }
+      renderer.setRenderTarget(null);
+      renderer.render(scene, camera);
+      if (microKart && microKart.sparkPoints && microKart.sparkPoints.visible) {
+        const prevAutoClear = renderer.autoClear;
+        renderer.autoClear = false;
+        renderer.render(sparkScene, camera);
+        renderer.autoClear = prevAutoClear;
+      }
+    } else {
+      composer.render();
+    }
     window.__deskRacerStats = {
       calls: renderer.info.render.calls,
       triangles: renderer.info.render.triangles,

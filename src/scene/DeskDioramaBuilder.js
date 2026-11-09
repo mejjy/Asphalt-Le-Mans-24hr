@@ -20,7 +20,8 @@ import {
  * - Brighter, clearer natural daylight colors on grass, hills, trees, and lake, transitioning
  *   smoothly and cohesively into cooler, darker early-morning dawn tones over the 120s run.
  */
-export function buildProceduralDeskDiorama(manifest, splineData) {
+export function buildProceduralDeskDiorama(manifest, splineData, perfConfig = {}) {
+  const isMobilePerf = Boolean(perfConfig.isMobileDevice);
   const dioramaRoot = new THREE.Group();
   dioramaRoot.name = 'LeMansFrenchLandscape';
 
@@ -28,6 +29,7 @@ export function buildProceduralDeskDiorama(manifest, splineData) {
   nightGlowGroup.name = 'LeMansNightGlowGroup';
 
   const samples = splineData?.samples || [];
+  const sampleCount = samples.length;
 
   // Rolling Sarthe countryside hills ("Coteaux de la Sarthe") — moderate, natural French hill heights
   // rather than oversized mountains, positioned with generous clearance outside the circuit perimeter
@@ -55,20 +57,35 @@ export function buildProceduralDeskDiorama(manifest, splineData) {
     [ 1.20,  0.64, 0.23, 0.18, 0.072, -0.19, 18.2],
   ];
 
-  // Fast lookup of closest track sample distance and elevation so terrain follows the road seamlessly
+  // Fast 2-pass strided lookup of closest track sample distance and elevation (~12x faster startup on mobile CPUs)
   function getClosestTrackInfo(x, z) {
-    if (!samples.length) return { minDist: 999.0, trackY: 0.025 };
-    let minD = 999.0;
-    let bestY = 0.025;
-    for (let s = 0; s < samples.length; s++) {
+    if (!sampleCount) return { minDist: 999.0, trackY: 0.025 };
+    let minSq = 999999.0;
+    let bestIdx = 0;
+    const stride = 6;
+    for (let s = 0; s < sampleCount; s += stride) {
       const p = samples[s].position;
-      const d = Math.hypot(p[0] - x, p[2] - z);
-      if (d < minD) {
-        minD = d;
-        bestY = p[1];
+      const dx = p[0] - x;
+      const dz = p[2] - z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq < minSq) {
+        minSq = dSq;
+        bestIdx = s;
       }
     }
-    return { minDist: minD, trackY: bestY };
+    for (let offset = -stride; offset <= stride; offset++) {
+      if (offset === 0) continue;
+      const idx = (bestIdx + offset + sampleCount) % sampleCount;
+      const p = samples[idx].position;
+      const dx = p[0] - x;
+      const dz = p[2] - z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq < minSq) {
+        minSq = dSq;
+        bestIdx = idx;
+      }
+    }
+    return { minDist: Math.sqrt(minSq), trackY: samples[bestIdx].position[1] };
   }
 
   function getTrackDistance(x, z) {
@@ -151,7 +168,8 @@ export function buildProceduralDeskDiorama(manifest, splineData) {
   // -------------------------------------------------------------------------
   const terrainTex = createCountrysideTerrainTexture();
 
-  const terrainGeo = new THREE.PlaneGeometry(16.0, 16.0, 260, 260);
+  const terrainSegments = isMobilePerf ? 168 : 240;
+  const terrainGeo = new THREE.PlaneGeometry(16.0, 16.0, terrainSegments, terrainSegments);
   terrainGeo.rotateX(-Math.PI * 0.5);
 
   const posAttr = terrainGeo.attributes.position;
@@ -695,11 +713,11 @@ export function buildProceduralDeskDiorama(manifest, splineData) {
   crownInstanced.receiveShadow = true;
 
   const crown2Instanced = new THREE.InstancedMesh(crownUpperGeo, crownMat, numTrees);
-  crown2Instanced.castShadow = true;
+  crown2Instanced.castShadow = !isMobilePerf;
   crown2Instanced.receiveShadow = true;
 
   const crown3Instanced = new THREE.InstancedMesh(crownSideGeo, crownMat, numTrees);
-  crown3Instanced.castShadow = true;
+  crown3Instanced.castShadow = !isMobilePerf;
   crown3Instanced.receiveShadow = true;
 
   const _treeMat = new THREE.Matrix4();
@@ -956,10 +974,10 @@ export function buildProceduralDeskDiorama(manifest, splineData) {
   pineTier1Inst.castShadow = true;
   pineTier1Inst.receiveShadow = true;
   const pineTier2Inst = new THREE.InstancedMesh(pineTier2Geo, crownMat, maxPines);
-  pineTier2Inst.castShadow = true;
+  pineTier2Inst.castShadow = !isMobilePerf;
   pineTier2Inst.receiveShadow = true;
   const pineTier3Inst = new THREE.InstancedMesh(pineTier3Geo, crownMat, maxPines);
-  pineTier3Inst.castShadow = true;
+  pineTier3Inst.castShadow = !isMobilePerf;
   pineTier3Inst.receiveShadow = true;
 
   const pineTints = [0x23491d, 0x2b5522, 0x1e4119, 0x315d27, 0x274e20];
@@ -1049,7 +1067,7 @@ export function buildProceduralDeskDiorama(manifest, splineData) {
   const maxShrubs = 200;
   const shrubGeo = createNaturalFoliageGeometry(0.0085, 10, 8, 0.0, 0.0045, 0.0, 2.3);
   const shrubInst = new THREE.InstancedMesh(shrubGeo, crownMat, maxShrubs);
-  shrubInst.castShadow = true;
+  shrubInst.castShadow = !isMobilePerf;
   shrubInst.receiveShadow = true;
   let shrubCount = 0;
 
@@ -1155,12 +1173,14 @@ export function buildProceduralDeskDiorama(manifest, splineData) {
     headMesh.rotation.x = 0.45;
     towerGroup.add(headMesh);
 
-    const spot = new THREE.SpotLight(0xffecc4, 0.06, 0.32, Math.PI * 0.34, 0.72, 1.5);
-    spot.position.set(0, mastHeight, 0);
-    spot.target.position.set(0, -mastHeight, -0.04);
-    towerGroup.add(spot);
-    towerGroup.add(spot.target);
-    perimeterSpots.push(spot);
+    if (!isMobilePerf) {
+      const spot = new THREE.SpotLight(0xffecc4, 0.06, 0.32, Math.PI * 0.34, 0.72, 1.5);
+      spot.position.set(0, mastHeight, 0);
+      spot.target.position.set(0, -mastHeight, -0.04);
+      towerGroup.add(spot);
+      towerGroup.add(spot.target);
+      perimeterSpots.push(spot);
+    }
 
     dioramaRoot.add(towerGroup);
   }

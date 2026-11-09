@@ -9,7 +9,10 @@ import * as THREE from 'three';
  *   00:30 -> 00:00: Dusk -> Darker Cinematic Dawn (deep indigo-slate sky, subtle dawn horizon,
  *                   cooler tones, comfortable road & car visibility)
  */
-export function buildGoldenHourAtmosphere(scene) {
+export function buildGoldenHourAtmosphere(scene, perfConfig = {}) {
+  const isMobilePerf = Boolean(perfConfig.isMobileDevice);
+  const shadowSize = perfConfig.shadowMapSize || (isMobilePerf ? 1024 : 2048);
+
   const atmosphereGroup = new THREE.Group();
   atmosphereGroup.name = 'OutdoorLeMansLightingRig';
 
@@ -21,8 +24,8 @@ export function buildGoldenHourAtmosphere(scene) {
   const sunLight = new THREE.DirectionalLight(0xfffaf0, 1.42);
   sunLight.position.set(-1.2, 2.65, -1.7);
   sunLight.castShadow = true;
-  sunLight.shadow.mapSize.width = 2048;
-  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.mapSize.width = shadowSize;
+  sunLight.shadow.mapSize.height = shadowSize;
   sunLight.shadow.camera.near = 0.1;
   sunLight.shadow.camera.far = 6.5;
   sunLight.shadow.camera.left = -1.75;
@@ -31,7 +34,7 @@ export function buildGoldenHourAtmosphere(scene) {
   sunLight.shadow.camera.bottom = -1.75;
   sunLight.shadow.bias = -0.0002;
   sunLight.shadow.normalBias = 0.0012;
-  sunLight.shadow.radius = 1.2;
+  sunLight.shadow.radius = isMobilePerf ? 1.0 : 1.2;
   atmosphereGroup.add(sunLight);
 
   // 3. Trackside fill light (subtle in daylight, provides gentle track definition as dawn darkens)
@@ -49,14 +52,14 @@ export function buildGoldenHourAtmosphere(scene) {
   );
   lampKeyLight.position.set(-0.15, 0.48, 0.12);
   lampKeyLight.target = lampTarget;
-  lampKeyLight.castShadow = true;
-  lampKeyLight.shadow.mapSize.width = 1024;
-  lampKeyLight.shadow.mapSize.height = 1024;
+  lampKeyLight.castShadow = !isMobilePerf;
+  lampKeyLight.shadow.mapSize.width = isMobilePerf ? 512 : 1024;
+  lampKeyLight.shadow.mapSize.height = isMobilePerf ? 512 : 1024;
   lampKeyLight.shadow.camera.near = 0.05;
   lampKeyLight.shadow.camera.far = 3.2;
   lampKeyLight.shadow.bias = -0.0003;
   lampKeyLight.shadow.normalBias = 0.001;
-  lampKeyLight.shadow.radius = 1.2;
+  lampKeyLight.shadow.radius = 1.0;
   atmosphereGroup.add(lampKeyLight);
 
   // 4. Subtle atmospheric god-ray curtains
@@ -82,7 +85,7 @@ export function buildGoldenHourAtmosphere(scene) {
   atmosphereGroup.add(godRayCurtainGroup);
 
   // 5. Subtle floating atmospheric motes
-  const motesCount = 90;
+  const motesCount = isMobilePerf ? 45 : 90;
   const motesGeo = new THREE.BufferGeometry();
   const motesPos = new Float32Array(motesCount * 3);
   for (let i = 0; i < motesCount; i++) {
@@ -221,7 +224,9 @@ export function buildGoldenHourAtmosphere(scene) {
 
   function requestShadowMapUpdate() {
     sunLight.shadow.needsUpdate = true;
-    lampKeyLight.shadow.needsUpdate = true;
+    if (lampKeyLight.castShadow) {
+      lampKeyLight.shadow.needsUpdate = true;
+    }
   }
 
   function updateAtmosphere(elapsedTime, settings, renderer) {
@@ -249,11 +254,14 @@ export function buildGoldenHourAtmosphere(scene) {
     }
     scene.environmentIntensity = stageEnvInt;
 
-    const pArr = motesGeo.attributes.position.array;
-    for (let i = 0; i < motesCount; i++) {
-      pArr[i * 3 + 1] += Math.sin(elapsedTime * 0.8 + i) * 0.00012;
+    motesPoints.visible = Boolean(settings.showDustMotes) && !isMobilePerf;
+    if (motesPoints.visible) {
+      const pArr = motesGeo.attributes.position.array;
+      for (let i = 0; i < motesCount; i++) {
+        pArr[i * 3 + 1] += Math.sin(elapsedTime * 0.8 + i) * 0.00012;
+      }
+      motesGeo.attributes.position.needsUpdate = true;
     }
-    motesGeo.attributes.position.needsUpdate = true;
   }
 
   setDayToDawnProgress(0.0);
